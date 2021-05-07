@@ -31,6 +31,11 @@ a, a:link, a:active, a:visited, a:hover {
         color: $oz_green_fg;
     }
   }
+  h4 {
+    a, a:link, a:active, a:visited, a:hover {
+    color: inherit; /* in the timeline page (and others) linked headers appear normal */
+    }
+  }
 }
 
 img.rgt_edge {
