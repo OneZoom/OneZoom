@@ -419,8 +419,9 @@ db.define_table('banned',
 
 # this table handles reservations, ledger and verified in a single table
 # to remove any sensitive information (e.g. before sending to 3rd parties)
-# you should make a local copy and do UPDATE reservations SET user_id=NULL, e_mail=NULL, twitter_name=NULL, allow_contact=NULL, user_sponsor_lang=NULL, user_sponsor_kind=NUll, user_sponsor_name=NULL, user_donor_name=NULL, user_more_info=NULL, user_message_OZ=NULL, user_giftaid=NULL, user_paid=NULL, PP_transaction_code=NULL, PP_e_mail=NULL, PP_first_name=NULL, PP_second_name=NULL, PP_town=NULL, PP_country=NULL, PP_house_and_street=NULL, PP_postcode=NULL, sale_time=NULL, verified_paid=NULL, asking_price=NULL;
-# also make sure not to export expired_reservations
+# you should make a local copy and either remove all rows of the reservations table (preferable) ordo e.g.
+#  UPDATE reservations SET user_id=NULL, username=NULL, e_mail=NULL, twitter_name=NULL, allow_contact=NULL, user_sponsor_lang=NULL, user_sponsor_kind=NUll, user_sponsor_name=NULL, user_donor_name=NULL, user_more_info=NULL, user_message_OZ=NULL, user_giftaid=NULL, user_paid=NULL, PP_transaction_code=NULL, PP_e_mail=NULL, PP_first_name=NULL, PP_second_name=NULL, PP_town=NULL, PP_country=NULL, PP_house_and_street=NULL, PP_postcode=NULL, sale_time=NULL, verified_paid=NULL, asking_price=NULL, admin_comment=NULL, sponsorship_story_level=NULL;
+# also make sure not to export the expired_reservations and wiped_reservations tables.
 db.define_table('reservations',
                 
     Field('OTT_ID', type = 'integer', unique=True, requires=IS_NOT_EMPTY()),
@@ -433,11 +434,23 @@ db.define_table('reservations',
     # these are general useful stats for a page
     Field('last_view', type = 'datetime', requires= IS_EMPTY_OR(IS_DATETIME()), writable=False),
     Field('reserve_time', type = 'datetime', requires= IS_EMPTY_OR(IS_DATETIME()), writable=False),
-    Field('user_registration_id', type = 'text', writable=False), #eventually this will correspond to a number in the registration_id field of the auth_user table (which should be initially filled out using OZfunc/__make_user_code, but for the moment we generate a new UUID for each treeview session
+    Field('user_registration_id', type = 'text', writable=False),
+    # This is created by OZfunc/__make_user_code and used instead of a session cookie so that
+    # when refreshing e.g. a sponsor_leaf page we know that it is the same user trying to sponsor.
+    # Eventually we intend this to correspond to a number in the registration_id field of the
+    # auth_user table but for the moment we generate a new UUID for each treeview session
+    
     # these handle auto reservation of pages
-                             
     Field('user_id', type = 'reference auth_user' , requires=IS_EMPTY_OR(IS_IN_DB(db, 'auth_user.id','%(first_name)s %(last_name)s'))),
-    # points to user table - built in      
+    # points to user table - built in. Is usually NULL because doner need not have a OneZoom login
+    db.auth_user.username.clone(),
+    # Create a "username" field of an identical type to that in auth_user.username.
+    # People can set a username in the reservations table at any point which has to be one
+    # that is not already present in reservations.username (and if it is idential to one
+    # in auth_user.username they should be prompted to log in. If, later, they create
+    # a login, we will always use the reservations.username value.
+    # The reservations.username field is optional but needed if the user is to have a
+    # "public" page of all their sponsorships 
     Field('e_mail', type = 'string', length=200, requires=IS_EMPTY_OR(IS_EMAIL())),
     Field('twitter_name', type = 'text'),
     Field('allow_contact', type = boolean),
@@ -455,7 +468,7 @@ db.define_table('reservations',
     Field('user_donor_show', type = boolean),
     # True if user doesn't mind online acknowledgment (e.g. on donors page). Prob shouldn't use title
     Field('user_more_info', type='string', length=40, requires=IS_EMPTY_OR(IS_LENGTH(maxsize=30))), 
-    # optional extra info about a person
+    # optional extra sponsorship text which could be shown on the leaf if there's enough space
     Field('user_nondefault_image', type = 'integer'),
     #has the user chosen a non-default image? None if no img or the already downloaded OZ
     # image was chosen, 0 if there was no OZ image but the default EoL image was chosen, 
@@ -476,6 +489,11 @@ db.define_table('reservations',
     # the amount they actually paid in total (I think it would be silly not to give the option to increase the amount)   
     Field('user_message_OZ', type = 'text', requires=(IS_LENGTH(maxsize=250))),
     # message for OZ e.g. to show on funding website or to request converstaion about url etc.
+    Field('sponsorship_story', type = 'text', requires=(IS_LENGTH(maxsize=1000))),
+    # The story behind .
+    Field('sponsorship_story_level', type = 'double'),
+    # A hand-curated quality score roughly matching that in `sponsorship_text_level`
+    # (e.g. 3 = completely standard & acceptable, 4 = excellent, 5 = best) - NULL = not reviewed.
     Field('user_giftaid', type = boolean),
     # can we collect gift aid?
                
@@ -559,8 +577,16 @@ db.define_table('reservations',
 #a duplicate of the reservations table to store old reservations. This table need never be sent to 3rd parties
 db.define_table('expired_reservations',
     Field('OTT_ID', type = 'integer', unique=False, requires=IS_NOT_EMPTY()), 
-    Field('was_renewed', type = boolean), 
+    Field('was_renewed', type = boolean),
+    # useful to know if part of the sponsorship time in this reservation is captured in another reservation row
     *[f.clone() for f in db.reservations if f.name != 'OTT_ID' and f.name!='id'],
+    format = '%(OTT_ID)s_%(name)s', migrate=is_testing)
+
+# Reservations that we never show anywhere on the site, even historically, but still keep
+# in the DB for our own (financial) records. Reservations can be moved into here by hand
+# and deleted from the other reservations table if requested by a sponsor
+db.define_table('wiped_reservations',
+    *[f.clone() for f in db.expired_reservations if f.name!='id'],
     format = '%(OTT_ID)s_%(name)s', migrate=is_testing)
 
 # this table defines the current pricing cutoff points
